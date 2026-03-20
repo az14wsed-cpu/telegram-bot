@@ -27,11 +27,11 @@ conn = sqlite3.connect("shop.db")
 cursor = conn.cursor()
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS orders(
-id INTEGER PRIMARY KEY,
-user_id INTEGER,
-uc INTEGER,
-price INTEGER,
-status TEXT
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER,
+    uc INTEGER,
+    price INTEGER,
+    status TEXT
 )
 """)
 conn.commit()
@@ -134,7 +134,8 @@ async def payment(msg: types.Message):
     conn.commit()
     kb = InlineKeyboardMarkup()
     kb.add(
-        InlineKeyboardButton("✅ Принять", callback_data=f"accept_{user}"),InlineKeyboardButton("❌ Отклонить", callback_data=f"decline_{user}")
+        InlineKeyboardButton("✅ Принять", callback_data=f"accept_{user}"),
+        InlineKeyboardButton("❌ Отклонить", callback_data=f"decline_{user}")
     )
     await bot.send_photo(
         ADMIN_ID,
@@ -154,96 +155,6 @@ async def decline(call: types.CallbackQuery):
     user = int(call.data.split("_")[1])
     await bot.send_message(user, "❌ Оплата отклонена")
 
-# ================= ПРОФИЛЬ =================
-def profile_kb():
-    kb = InlineKeyboardMarkup()
-    kb.add(InlineKeyboardButton("✏️ Изменить ID", callback_data="change_id"))
-    return kb
-
-@dp.message_handler(lambda msg: msg.text == "👤 Профиль")
-async def profile(msg: types.Message):
-    user = msg.from_user.id
-    username = msg.from_user.username or "нет"
-    pubg_id = user_pubg_id.get(user, "не указан")
-    await msg.answer(
-        f"👤 Профиль\n\nВаш ник: @{username}\nВаш PUBG ID: {pubg_id}",
-        reply_markup=profile_kb()
-    )
-
-@dp.callback_query_handler(lambda c: c.data == "change_id")
-async def change_id(call: types.CallbackQuery):
-    user_id = call.from_user.id
-    user_states[user_id] = "change_pubg_id"
-    await call.message.answer("Введите ваш PUBG ID:")
-    await call.answer()
-
-@dp.message_handler(lambda msg: user_states.get(msg.from_user.id) == "change_pubg_id")
-async def save_id(msg: types.Message):
-    user = msg.from_user.id
-    user_pubg_id[user] = msg.text
-    user_states[user] = None
-    await msg.answer(f"✅ PUBG ID сохранён: {msg.text}")
-
-# ================= ОТЗЫВЫ =================
-@dp.message_handler(lambda msg: msg.text == "⭐️ Отзывы")
-async def review(msg: types.Message):
-    user_states[msg.from_user.id] = "review"
-    await msg.answer("Напишите отзыв:")
-
-@dp.message_handler(lambda msg: user_states.get(msg.from_user.id) == "review")
-async def send_review(msg: types.Message):
-    user_states[msg.from_user.id] = None
-    await bot.send_message(
-        ADMIN_ID,
-        f"⭐️ Отзыв\n@{msg.from_user.username}\n{msg.text}"
-    )
-    await msg.answer("Спасибо ❤️")
-
-# ================= ПОДДЕРЖКА =================
-@dp.message_handler(lambda msg: msg.text == "🛠 Поддержка")
-async def support(msg: types.Message):
-    user_states[msg.from_user.id] = "support"
-    await msg.answer("Опишите проблему:")
-
-@dp.message_handler(lambda msg: user_states.get(msg.from_user.id) == "support")
-async def send_support(msg: types.Message):
-    user_states[msg.from_user.id] = None
-    await bot.send_message(
-        ADMIN_ID,
-        f"🛠 Поддержка\n@{msg.from_user.username}\n{msg.text}"
-    )
-    await msg.answer("Мы ответим")
-
-# ================= ЗАКАЗЫ =================
-@dp.message_handler(lambda msg: msg.text == "📦 Мои заказы")
-async def orders(msg: types.Message):
-    cursor.execute(
-        "SELECT uc, price FROM orders WHERE user_id=?",
-        (msg.from_user.id,)
-    )
-    data = cursor.fetchall()
-    if not data:
-        return await msg.answer("Нет заказов")
-    kb = InlineKeyboardMarkup()
-    text = "📦 Ваши заказы:\n\n"
-    for uc, price in data:
-        text += f"{uc} UC — {price}₽\n"
-        kb.add(InlineKeyboardButton(
-            f"Повторить {uc} UC",
-            callback_data=f"repeat_{uc}_{price}"
-        ))
-    await msg.answer(text, reply_markup=kb)
-
-@dp.callback_query_handler(lambda c: c.data.startswith("repeat_"))
-async def repeat(call: types.CallbackQuery):
-    _, uc, price = call.data.split("_")
-    user = call.from_user.id
-    cart[user] = {"uc": int(uc), "money": int(price)}
-    await call.message.answer(
-        f"🛒 Корзина\n\nUC: {uc}\nСумма: {price}₽",
-        reply_markup=shop_keyboard()
-    )
-
 # ================= HTTP СЕРВЕР ДЛЯ RENDER =================
 async def handle(request):
     return web.Response(text="Bot is running!")
@@ -251,7 +162,7 @@ async def handle(request):
 def start_webserver():
     app = web.Application()
     app.router.add_get("/", handle)
-    port = int(os.environ.get("PORT", 10000))  # Render автоматически задаёт PORT
+    port = int(os.environ.get("PORT", 10000))
     web.run_app(app, host="0.0.0.0", port=port)
 
 # ================= ЗАПУСК =================
