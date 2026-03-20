@@ -1,7 +1,7 @@
 import asyncio
-from aiohttp import web
-import sqlite3
 import os
+import sqlite3
+from aiohttp import web
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils import executor
@@ -12,7 +12,10 @@ loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
 
 # ================= НАСТРОЙКИ =================
-BOT_TOKEN = os.environ['TELEGRAM_TOKEN']  # безопасно через Environment Variable
+BOT_TOKEN = os.environ.get('TELEGRAM_TOKEN')
+if not BOT_TOKEN:
+    raise ValueError("❌ TELEGRAM_TOKEN не найден в переменных окружения!")
+
 ADMIN_ID = 7235056179
 MY_CARD = "9112 3872 98"
 
@@ -63,7 +66,7 @@ def main_menu():
 
 def shop_keyboard():
     kb = InlineKeyboardMarkup(row_width=1)
-    for pack, price in prices.items():
+    for pack in prices:
         kb.add(InlineKeyboardButton(f"➕ {pack}", callback_data=f"add_{pack}"))
     kb.add(
         InlineKeyboardButton("💳 Купить", callback_data="buy"),
@@ -131,8 +134,7 @@ async def payment(msg: types.Message):
     conn.commit()
     kb = InlineKeyboardMarkup()
     kb.add(
-        InlineKeyboardButton("✅ Принять", callback_data=f"accept_{user}"),
-InlineKeyboardButton("❌ Отклонить", callback_data=f"decline_{user}")
+        InlineKeyboardButton("✅ Принять", callback_data=f"accept_{user}"),InlineKeyboardButton("❌ Отклонить", callback_data=f"decline_{user}")
     )
     await bot.send_photo(
         ADMIN_ID,
@@ -249,7 +251,7 @@ async def handle(request):
 def start_webserver():
     app = web.Application()
     app.router.add_get("/", handle)
-    port = int(os.environ.get("PORT", 10000))
+    port = int(os.environ.get("PORT", 10000))  # Render автоматически задаёт PORT
     web.run_app(app, host="0.0.0.0", port=port)
 
 # ================= ЗАПУСК =================
