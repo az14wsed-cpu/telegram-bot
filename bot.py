@@ -1,286 +1,259 @@
 import asyncio
-import aiosqlite
-import logging
-import time
-
+from aiohttp import web
+import sqlite3
+import os
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils import executor
-from aiogram.contrib.fsm_storage.memory import MemoryStorage
-from aiogram.dispatcher.filters.state import State, StatesGroup
-from aiogram.dispatcher import FSMContext
+import threading
 
-
+# 🔥 FIX для Python 3.12+
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
 
-
-BOT_TOKEN = "8712838824:AAFVOLx_yOox4FiWvGf2dQa6_YMaBQIgv3Y"
+# ================= НАСТРОЙКИ =================
+BOT_TOKEN = os.environ['TELEGRAM_TOKEN']  # безопасно через Environment Variable
 ADMIN_ID = 7235056179
-CARD = "9112 3872 9876 1234"
-
-logging.basicConfig(level=logging.INFO)
+MY_CARD = "9112 3872 98"
 
 bot = Bot(token=BOT_TOKEN)
-storage = MemoryStorage()
-dp = Dispatcher(bot, storage=storage)
+dp = Dispatcher(bot)
 
-DB = "shop.db"
+# ================= БД =================
+conn = sqlite3.connect("shop.db")
+cursor = conn.cursor()
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS orders(
+id INTEGER PRIMARY KEY,
+user_id INTEGER,
+uc INTEGER,
+price INTEGER,
+status TEXT
+)
+""")
+conn.commit()
 
-
-products = {
-    "325 UC": 380,
+# ================= ДАННЫЕ =================
+prices = {
+    "60 UC": 78,
+    "325 UC": 400,
     "660 UC": 790,
-    "1800 UC": 1990,
-    "3850 UC": 3825,
+    "1800 UC": 2000,
+    "3850 UC": 3900,
     "8100 UC": 7600,
-    "12610 UC":12200,
+    "16200 UC": 16000,
+    "24300 UC": 24000,
+    "32400 UC": 32000,
+    "40500 UC": 40000,
 }
 
-
 cart = {}
+user_states = {}
+user_pubg_id = {}
 
-
-last = {}
-DELAY = 1
-
-
-def anti_spam(user):
-    now = time.time()
-    if user in last and now - last[user] < DELAY:
-        return False
-    last[user] = now
-    return True
-
-
-async def init_db():
-    async with aiosqlite.connect(DB) as db:
-        await db.execute("""
-        CREATE TABLE IF NOT EXISTS orders(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            uc INTEGER,
-            price INTEGER,
-            status TEXT
-        )
-        """)
-        await db.commit()
-
-
-
-menu = ReplyKeyboardMarkup(resize_keyboard=True)
-menu.add(KeyboardButton("🛒 Магазин"), KeyboardButton("📦 Мои заказы"))
-menu.add(KeyboardButton("🎧 Поддержка"), KeyboardButton("🕒 График работы"))
-menu.add(KeyboardButton("⭐ Отзывы"))
-
-
-
-class Review(StatesGroup):
-    waiting = State()
-
-
-class Support(StatesGroup):
-    waiting = State()
-
-
-
-def shop_kb():
-    kb = InlineKeyboardMarkup(row_width=1)
-    for p, price in products.items():
-        kb.add(
-            InlineKeyboardButton(
-                f"{p} — {price}₽",
-                callback_data=f"add_{p}"
-            )
-        )
-    kb.add(InlineKeyboardButton("💳 Купить", callback_data="buy"))
+# ================= МЕНЮ =================
+def main_menu():
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add(KeyboardButton("🛒 Купить UC"))
+    kb.add(KeyboardButton("👤 Профиль"), KeyboardButton("📦 Мои заказы"))
+    kb.add(KeyboardButton("⭐️ Отзывы"), KeyboardButton("🛠 Поддержка"))
+    kb.add(KeyboardButton("🕒 График работы"))
+    kb.add(KeyboardButton("📜 Правила"))
     return kb
 
+def shop_keyboard():
+    kb = InlineKeyboardMarkup(row_width=1)
+    for pack, price in prices.items():
+        kb.add(InlineKeyboardButton(f"➕ {pack}", callback_data=f"add_{pack}"))
+    kb.add(
+        InlineKeyboardButton("💳 Купить", callback_data="buy"),
+        InlineKeyboardButton("🗑 Очистить", callback_data="clear")
+    )
+    return kb
 
+async def update_cart(call):
+    user = call.from_user.id
+    uc = cart[user]["uc"]
+    money = cart[user]["money"]
+    text = f"🛒 Корзина\n\nUC: {uc}\nСумма: {money}₽"
+    await call.message.edit_text(text, reply_markup=shop_keyboard())
 
-@dp.message_handler(commands=["start"])
+# ================= ХЕНДЛЕРЫ =================
+@dp.message_handler(commands=['start'])
 async def start(msg: types.Message):
-    user = msg.from_user.id
-    if user not in cart:
-        cart[user] = {"uc": 0, "money": 0}
-    await msg.answer("Добро пожаловать в UC магазин", reply_markup=menu)
+    cart[msg.from_user.id] = {"uc": 0, "money": 0}
+    await msg.answer("👋 Добро пожаловать!", reply_markup=main_menu())
 
-
-
-@dp.message_handler(lambda message: message.text == "🛒 Магазин")
+@dp.message_handler(lambda msg: msg.text == "🛒 Купить UC")
 async def shop(msg: types.Message):
     user = msg.from_user.id
-    if user not in cart:
-        cart[user] = {"uc": 0, "money": 0}
-    text = (
-        f"🛒 Магазин UC\n\n"
-        f"Корзина:\nUC: {cart[user]['uc']}\n"
-        f"Сумма: {cart[user]['money']}₽\n\n"
-        "Выберите пакет:"
-    )
-    await msg.answer(text, reply_markup=shop_kb())
-
-
+    cart.setdefault(user, {"uc": 0, "money": 0})
+    await msg.answer("Выберите UC:", reply_markup=shop_keyboard())
 
 @dp.callback_query_handler(lambda c: c.data.startswith("add_"))
 async def add_uc(call: types.CallbackQuery):
     user = call.from_user.id
     pack = call.data.replace("add_", "")
     uc = int(pack.split()[0])
-    price = products[pack]
-    if user not in cart:
-        cart[user] = {"uc": 0, "money": 0}
+    price = prices[pack]
+    cart.setdefault(user, {"uc": 0, "money": 0})
     cart[user]["uc"] += uc
     cart[user]["money"] += price
-    text = (
-        f"🛒 Корзина\n\n"
-        f"UC: {cart[user]['uc']}\n"
-        f"Сумма: {cart[user]['money']}₽"
-    )
-    await call.message.edit_text(text, reply_markup=shop_kb())
+    await update_cart(call)
+    await call.answer()
 
-
+@dp.callback_query_handler(lambda c: c.data == "clear")
+async def clear(call: types.CallbackQuery):
+    cart[call.from_user.id] = {"uc": 0, "money": 0}
+    await update_cart(call)
+    await call.answer("Очищено")
 
 @dp.callback_query_handler(lambda c: c.data == "buy")
 async def buy(call: types.CallbackQuery):
     user = call.from_user.id
-    if user not in cart or cart[user]["money"] == 0:
-        await call.answer("Корзина пустая")
-        return
     total = cart[user]["money"]
+    if total == 0:
+        return await call.answer("Корзина пустая")
     await bot.send_message(
         user,
-        f"💳 Оплатите {total}₽\n\nКарта:\n{CARD}\n\nПосле оплаты отправьте скрин."
+        f"💳 Оплатите {total}₽\n\nКарта:\n{MY_CARD}\n\nОтправьте скрин"
     )
-
-
 
 @dp.message_handler(content_types=["photo"])
 async def payment(msg: types.Message):
     user = msg.from_user.id
-    if user not in cart or cart[user]["money"] == 0:
-        await msg.answer("Сначала сделайте заказ")
-        return
     uc = cart[user]["uc"]
-    money = cart[user]["money"]
-    # Запись заказа в БД
-    async with aiosqlite.connect(DB) as db:
-        cursor = await db.execute(
-            "INSERT INTO orders(user_id, uc, price, status) VALUES(?,?,?,?)",
-            (user, uc, money, "waiting")
-        )
-        await db.commit()
-        order_id = cursor.lastrowid
-    # Отправка подтверждения
+    total = cart[user]["money"]
+    cursor.execute(
+        "INSERT INTO orders(user_id, uc, price, status) VALUES(?,?,?,?)",
+        (user, uc, total, "pending")
+    )
+    conn.commit()
     kb = InlineKeyboardMarkup()
     kb.add(
-        InlineKeyboardButton("✅ Подтвердить", callback_data=f"ok_{order_id}_{user}"),
-        InlineKeyboardButton("❌ Отклонить", callback_data=f"no_{order_id}_{user}")
+        InlineKeyboardButton("✅ Принять", callback_data=f"accept_{user}"),
+InlineKeyboardButton("❌ Отклонить", callback_data=f"decline_{user}")
     )
     await bot.send_photo(
         ADMIN_ID,
         msg.photo[-1].file_id,
-        caption=f"Новый заказ\nUC: {uc}\nСумма: {money}",
+        caption=f"Заказ\n{uc} UC\n{total}₽",
         reply_markup=kb
     )
-    await msg.answer("Заказ отправлен на проверку")
-    # Очистка корзины
-    cart[user] = {"uc": 0, "money": 0}
+    await msg.answer("✅ На проверке")
 
+@dp.callback_query_handler(lambda c: c.data.startswith("accept_"))
+async def accept(call: types.CallbackQuery):
+    user = int(call.data.split("_")[1])
+    await bot.send_message(user, "✅ Оплата подтверждена")
 
+@dp.callback_query_handler(lambda c: c.data.startswith("decline_"))
+async def decline(call: types.CallbackQuery):
+    user = int(call.data.split("_")[1])
+    await bot.send_message(user, "❌ Оплата отклонена")
 
-@dp.message_handler(lambda message: message.text == "🕒 График работы")
-async def work(msg: types.Message):
+# ================= ПРОФИЛЬ =================
+def profile_kb():
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton("✏️ Изменить ID", callback_data="change_id"))
+    return kb
+
+@dp.message_handler(lambda msg: msg.text == "👤 Профиль")
+async def profile(msg: types.Message):
+    user = msg.from_user.id
+    username = msg.from_user.username or "нет"
+    pubg_id = user_pubg_id.get(user, "не указан")
     await msg.answer(
-        "🕒 График работы\n\n"
-        "Пн-Пт: 15:00 - 22:00\n"
-        "Сб-Вс: 6:00 - 22:00"
+        f"👤 Профиль\n\nВаш ник: @{username}\nВаш PUBG ID: {pubg_id}",
+        reply_markup=profile_kb()
     )
 
+@dp.callback_query_handler(lambda c: c.data == "change_id")
+async def change_id(call: types.CallbackQuery):
+    user_id = call.from_user.id
+    user_states[user_id] = "change_pubg_id"
+    await call.message.answer("Введите ваш PUBG ID:")
+    await call.answer()
 
+@dp.message_handler(lambda msg: user_states.get(msg.from_user.id) == "change_pubg_id")
+async def save_id(msg: types.Message):
+    user = msg.from_user.id
+    user_pubg_id[user] = msg.text
+    user_states[user] = None
+    await msg.answer(f"✅ PUBG ID сохранён: {msg.text}")
 
-@dp.message_handler(lambda message: message.text == "⭐ Отзывы")
-async def review_start(msg: types.Message):
-    await msg.answer("Напишите ваш отзыв:")
-    await Review.waiting.set()
+# ================= ОТЗЫВЫ =================
+@dp.message_handler(lambda msg: msg.text == "⭐️ Отзывы")
+async def review(msg: types.Message):
+    user_states[msg.from_user.id] = "review"
+    await msg.answer("Напишите отзыв:")
 
-
-@dp.message_handler(state=Review.waiting)
-async def review_send(msg: types.Message, state: FSMContext):
+@dp.message_handler(lambda msg: user_states.get(msg.from_user.id) == "review")
+async def send_review(msg: types.Message):
+    user_states[msg.from_user.id] = None
     await bot.send_message(
         ADMIN_ID,
-        f"Новый отзыв\n\n"
-        f"{msg.from_user.full_name}\n"
-        f"{msg.text}"
+        f"⭐️ Отзыв\n@{msg.from_user.username}\n{msg.text}"
     )
-    await msg.answer("Спасибо за отзыв!")
-    await state.finish()
+    await msg.answer("Спасибо ❤️")
 
+# ================= ПОДДЕРЖКА =================
+@dp.message_handler(lambda msg: msg.text == "🛠 Поддержка")
+async def support(msg: types.Message):
+    user_states[msg.from_user.id] = "support"
+    await msg.answer("Опишите проблему:")
 
-
-@dp.message_handler(lambda message: message.text == "🎧 Поддержка")
-async def support_start(msg: types.Message):
-    await msg.answer("Напишите сообщение в поддержку:")
-    await Support.waiting.set()
-
-
-@dp.message_handler(state=Support.waiting)
-async def support_send(msg: types.Message, state: FSMContext):
+@dp.message_handler(lambda msg: user_states.get(msg.from_user.id) == "support")
+async def send_support(msg: types.Message):
+    user_states[msg.from_user.id] = None
     await bot.send_message(
         ADMIN_ID,
-        f"Сообщение в поддержку\n\n"
-        f"{msg.from_user.full_name}\n"
-        f"{msg.text}"
+        f"🛠 Поддержка\n@{msg.from_user.username}\n{msg.text}"
     )
-    await msg.answer("Сообщение отправлено поддержке")
-    await state.finish()
+    await msg.answer("Мы ответим")
 
-
-
-@dp.message_handler(lambda message: message.text == "📦 Мои заказы")
+# ================= ЗАКАЗЫ =================
+@dp.message_handler(lambda msg: msg.text == "📦 Мои заказы")
 async def orders(msg: types.Message):
-    async with aiosqlite.connect(DB) as db:
-        cursor = await db.execute(
-            "SELECT uc, price, status FROM orders WHERE user_id=?",
-            (msg.from_user.id,)
-        )
-        rows = await cursor.fetchall()
-    if not rows:
-        await msg.answer("У вас пока нет заказов")
-        return
-    text = "Ваши заказы:\n\n"
-    for uc, price, status in rows:
-        text += f"{uc} UC - {price}₽ ({status})\n"
-    await msg.answer(text)
+    cursor.execute(
+        "SELECT uc, price FROM orders WHERE user_id=?",
+        (msg.from_user.id,)
+    )
+    data = cursor.fetchall()
+    if not data:
+        return await msg.answer("Нет заказов")
+    kb = InlineKeyboardMarkup()
+    text = "📦 Ваши заказы:\n\n"
+    for uc, price in data:
+        text += f"{uc} UC — {price}₽\n"
+        kb.add(InlineKeyboardButton(
+            f"Повторить {uc} UC",
+            callback_data=f"repeat_{uc}_{price}"
+        ))
+    await msg.answer(text, reply_markup=kb)
 
+@dp.callback_query_handler(lambda c: c.data.startswith("repeat_"))
+async def repeat(call: types.CallbackQuery):
+    _, uc, price = call.data.split("_")
+    user = call.from_user.id
+    cart[user] = {"uc": int(uc), "money": int(price)}
+    await call.message.answer(
+        f"🛒 Корзина\n\nUC: {uc}\nСумма: {price}₽",
+        reply_markup=shop_keyboard()
+    )
 
-@dp.callback_query_handler(lambda c: c.data.startswith("ok_"))
-async def approve(call: types.CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
-        return
-    data = call.data.split("_")
-    order_id = int(data[1])
-    user_id = int(data[2])
-    async with aiosqlite.connect(DB) as db:
-        await db.execute("UPDATE orders SET status='paid' WHERE id=?", (order_id,))
-        await db.commit()
-    await bot.send_message(user_id, "Платеж подтвержден")
+# ================= HTTP СЕРВЕР ДЛЯ RENDER =================
+async def handle(request):
+    return web.Response(text="Bot is running!")
 
+def start_webserver():
+    app = web.Application()
+    app.router.add_get("/", handle)
+    port = int(os.environ.get("PORT", 10000))
+    web.run_app(app, host="0.0.0.0", port=port)
 
-
-@dp.callback_query_handler(lambda c: c.data.startswith("no_"))
-async def reject(call: types.CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
-        return
-    data = call.data.split("_")
-    order_id = int(data[1])
-    user_id = int(data[2])
-    async with aiosqlite.connect(DB) as db:
-        await db.execute("UPDATE orders SET status='rejected' WHERE id=?", (order_id,))
-        await db.commit()
-    await bot.send_message(user_id, "Заказ отклонен")
-
-
+# ================= ЗАПУСК =================
 if __name__ == "__main__":
-    loop.run_until_complete(init_db())
-    executor.start_polling(dp)
+    print("🚀 BOT STARTED")
+    threading.Thread(target=start_webserver, daemon=True).start()
+    executor.start_polling(dp, skip_updates=True)
