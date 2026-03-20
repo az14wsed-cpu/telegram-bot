@@ -1,13 +1,13 @@
-import asyncio
 import os
+import asyncio
+import threading
 import sqlite3
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils import executor
-import threading
 
-# 🔥 FIX для Python 3.12+
+# 🔥 FIX Python 3.12+
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
 
@@ -27,11 +27,11 @@ conn = sqlite3.connect("shop.db")
 cursor = conn.cursor()
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS orders(
-    id INTEGER PRIMARY KEY,
-    user_id INTEGER,
-    uc INTEGER,
-    price INTEGER,
-    status TEXT
+id INTEGER PRIMARY KEY,
+user_id INTEGER,
+uc INTEGER,
+price INTEGER,
+status TEXT
 )
 """)
 conn.commit()
@@ -134,8 +134,7 @@ async def payment(msg: types.Message):
     conn.commit()
     kb = InlineKeyboardMarkup()
     kb.add(
-        InlineKeyboardButton("✅ Принять", callback_data=f"accept_{user}"),
-        InlineKeyboardButton("❌ Отклонить", callback_data=f"decline_{user}")
+        InlineKeyboardButton("✅ Принять", callback_data=f"accept_{user}"),InlineKeyboardButton("❌ Отклонить", callback_data=f"decline_{user}")
     )
     await bot.send_photo(
         ADMIN_ID,
