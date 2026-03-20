@@ -15,7 +15,7 @@ loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
 
 
-BOT_TOKEN = ""
+BOT_TOKEN = "8712838824:AAFVOLx_yOox4FiWvGf2dQa6_YMaBQIgv3Y"
 ADMIN_ID = 7235056179
 CARD = "9112 3872 9876 1234"
 
